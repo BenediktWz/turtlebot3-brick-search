@@ -1,0 +1,83 @@
+<!-- -->
+<launch>
+  <!-- Arguments -->
+  <arg name="model" default="$(env TURTLEBOT3_MODEL)" doc="model type [burger, waffle, waffle_pi]"/>
+  <arg name="configuration_basename" default="turtlebot3_lds_2d.lua"/>
+  <arg name="sensor_range" default="1.0"/>
+  <arg name="cmd_vel_topic" default="/cmd_vel" />
+  <arg name="odom_topic" default="odom" />
+
+  <!-- TurtleBot3 and Gmapping -->
+  <include file="$(find turtlebot3_slam)/launch/turtlebot3_gmapping.launch">
+    <arg name="model" value="$(arg model)" />
+  </include>
+
+  <!-- AMCL -->
+  <include file="$(find turtlebot3_navigation)/launch/amcl.launch"/>
+
+  <!-- move_base -->
+  <node pkg="move_base" type="move_base" respawn="false" name="move_base" output="screen">
+    <param name="base_local_planner" value="dwa_local_planner/DWAPlannerROS" />
+    <rosparam file="$(find turtlebot3_navigation)/param/costmap_common_params_$(arg model).yaml" command="load" ns="global_costmap" />
+    <rosparam file="$(find turtlebot3_navigation)/param/costmap_common_params_$(arg model).yaml" command="load" ns="local_costmap" />
+    <rosparam file="$(find turtlebot3_navigation)/param/local_costmap_params.yaml" command="load" />
+    <rosparam file="$(find turtlebot3_navigation)/param/global_costmap_params.yaml" command="load" />
+    <rosparam file="$(find turtlebot3_navigation)/param/move_base_params.yaml" command="load" />
+    <rosparam file="$(find turtlebot3_navigation)/param/dwa_local_planner_params_$(arg model).yaml" command="load" />
+    <remap from="cmd_vel" to="$(arg cmd_vel_topic)"/>
+    <remap from="odom" to="$(arg odom_topic)"/>
+  </node>
+
+  <!-- frontier_exploration -->
+    <node pkg="exploration_server" type="plugin_client" name="plugin_client" output="screen">
+    </node>
+
+  <node pkg="exploration_server" type="exploration_server_node" name="exploration_server_node" output="screen" >
+        <rosparam param="points" ns="explore_costmap" file="$(find exploration_server)/config/points.yaml" command="load"/>
+
+    <param name="frequency" type="double" value="2.0"/>
+    <param name="goal_aliasing" type="double" value="$(arg sensor_range)"/>
+
+        <rosparam ns="explore_costmap" subst_value="true">
+            footprint: [[0.1, 0.0], [0.0, 0.1], [-0.1, 0.0], [0.0, -0.1]]
+            robot_radius: 0.10
+
+            transform_tolerance: 0.5
+            update_frequency: 5.0
+            publish_frequency: 5.0
+
+            #must match incoming static map
+            global_frame: map
+            robot_base_frame: base_link
+            resolution: 0.05
+
+            rolling_window: false
+            track_unknown_space: true
+
+            plugins:
+
+                - {name: static,           type: "costmap_2d::StaticLayer"}
+                - {name: polygon_layer,    type: "polygon_layer::PolygonLayer"}
+                #Can disable sensor layer if gmapping is fast enough to update scans
+                - {name: sensor,           type: "costmap_2d::ObstacleLayer"}
+                - {name: inflation,        type: "costmap_2d::InflationLayer"}
+
+            static:
+                #Can pull data from gmapping, map_server or a non-rolling costmap
+                map_topic: /map
+                # map_topic: move_base/global_costmap/costmap
+                subscribe_to_updates: true
+
+            polygon_layer:
+                resize_to_polygon: true
+
+            sensor:
+                observation_sources: laser
+                laser: {data_type: LaserScan, clearing: true, marking: true, topic: scan, inf_is_valid: true, raytrace_range: $(arg sensor_range), obstacle_range: $(arg sensor_range)}
+
+            inflation:
+                inflation_radius: 0.15
+      </rosparam>
+
+  </node>
+</launch>
